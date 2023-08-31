@@ -1,0 +1,6 @@
+AHostname : ${A_HOSTNAME}
+BHostname : ${B_HOSTNAME}
+AMongo:
+  Host: ${A_MONGO_HOST}
+BMongo:
+  Host: ${B_MONGO_HOST}
