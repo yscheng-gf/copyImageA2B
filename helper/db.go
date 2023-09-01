@@ -8,9 +8,9 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-func InitMongo(host string) *mongo.Client {
+func InitMongo(ctx context.Context, host string) *mongo.Client {
 	mongoCli, err := mongo.Connect(
-		context.TODO(),
+		ctx,
 		options.Client().SetHosts(strings.Split(host, ",")),
 	)
 	if err != nil {
