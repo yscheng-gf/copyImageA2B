@@ -20,6 +20,7 @@ import (
 	"github.com/yscheng-gf/copyImageA2B/model"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 const (
@@ -29,6 +30,7 @@ const (
 )
 
 var Map sync.Map
+var aGamesMap = make(map[string]string)
 
 type Job struct {
 	ImageDest string
@@ -121,9 +123,32 @@ func main() {
 
 	go consumer.startConsumer(ctx)
 
-	client := helper.InitMongo(ctx, c.BMongo.Host)
-	downloadGameBrandImage(ctx, consumer, client, c.AHostname)
-	downloadGameImage(ctx, consumer, client, c.AHostname)
+	// init mongo
+	aClient := helper.InitMongo(ctx, c.AMongo.Host)
+	bClient := helper.InitMongo(ctx, c.BMongo.Host)
+
+	cur, err := aClient.Database(consts.MongoDatabase).
+		Collection(consts.Game).
+		Find(ctx, bson.M{}, options.Find().SetProjection(bson.M{
+			"game_code": 1,
+			"image":     1,
+		}))
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer cur.Close(ctx)
+	for cur.Next(ctx) {
+		game := new(model.Game)
+		if err := cur.Decode(game); err != nil {
+			log.Println(err)
+			continue
+		}
+		aGamesMap[game.GameCode] = game.Image
+	}
+
+	downloadGameBrandImage(ctx, consumer, bClient, c.AHostname)
+	downloadGameImage(ctx, consumer, bClient, c.AHostname)
 	close(consumer.InputChan)
 	wg.Wait()
 }
@@ -191,10 +216,21 @@ func downloadGameImage(ctx context.Context, consumer *Consumer, client *mongo.Cl
 			continue
 		}
 
-		if game.Image != "" {
-			imageDest := localDest + "/" + game.Image
-			consumer.queue(Job{imageDest, aHostname})
+		if game.Image == "" && aGamesMap[game.GameCode] != "" {
+			if _, err := client.Database(consts.MongoDatabase).
+				Collection(consts.Game).
+				UpdateOne(ctx, bson.M{"game_code": game.GameCode}, bson.M{"$set": bson.M{"image": aGamesMap[game.GameCode]}}); err != nil {
+				log.Println(err)
+				continue
+			}
+			game.Image = aGamesMap[game.GameCode]
+			log.Printf("Update %s image to %s\n", game.GameCode, aGamesMap[game.GameCode])
 		}
+		if game.Image == "" {
+			continue
+		}
+		imageDest := localDest + "/" + game.Image
+		consumer.queue(Job{imageDest, aHostname})
 	}
 }
 
